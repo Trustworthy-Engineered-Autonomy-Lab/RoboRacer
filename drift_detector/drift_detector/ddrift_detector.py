@@ -97,7 +97,7 @@ class DriftingDetector(Node):
             self.drifting_publisher.publish(drifting_msg)
             
         else:
-            turning_radius = (self.wheelbase / np.sin(self.current_steering_angle)) + 0.5 * self.tirewidth  # change to odom angular z value instead of manual calculation
+            turning_radius = (self.wheelbase / np.tan(self.current_steering_angle)) + 0.5 * self.tirewidth  # change to odom angular z value instead of manual calculation
             
             if self.current_velocity > 0:  # Prevent division by zero
                 theoretical_angular_velocity = self.current_velocity * turning_radius
@@ -123,7 +123,7 @@ class DriftingDetector(Node):
             linear_acc = self.historical_acc
             # TODO: logic here to calculate coefficient of friction while driving in a straight line
         else:
-            turning_radius = (self.wheelbase / np.sin(self.current_steering_angle)) + 0.5 * self.tirewidth
+            turning_radius = (self.wheelbase / np.tan(self.current_steering_angle)) + 0.5 * self.tirewidth
         
         if turning_radius > 0:
             force_of_friction = self.mass * ((self.current_velocity * self.current_velocity) / turning_radius)
