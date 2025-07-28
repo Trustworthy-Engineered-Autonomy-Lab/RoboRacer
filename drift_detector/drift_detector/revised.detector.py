@@ -50,14 +50,18 @@ class DriftDetector(Node):
         self.turning_radius = float('inf')
         self.theor_ang_vel = float('inf')
         self.twist_angular_z = float('inf')
-        self.linear_acceleration = float('inf')
-        self.y_lin_accel = float('inf')
+        self.twist_linear_x = float('inf')
+        self.twist_linear_y = float('inf')
+        self.linear_acceleration_x = float('inf')
+        self.linear_acceleration_y = float('inf')
+        self.linear_acceleration_z = float('inf')
         self.timestamp = 0.0
 
         self.drifting = False
         self.angular = False
         self.linear = False
         self.drifting_timestamp = 0.0
+        self.drift_length = 1.0
 
     def ackermann_callback(self, msg):
         timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
@@ -76,13 +80,15 @@ class DriftDetector(Node):
     def imu_callback(self, msg):
         timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         angular_velocity = msg.angular_velocity.z
-        linear_acceleration = msg.linear_acceleration.x
-        y_lin_accel = msg.linear_acceleration.y
+        linear_acceleration_x = msg.linear_acceleration.x
+        linear_acceleration_y = msg.linear_acceleration.y
+        linear_acceleration_z = msg.linear_acceleration.z
 
         self.timestamp = timestamp
         self.twist_angular_z = angular_velocity
-        self.linear_acceleration = linear_acceleration
-        self.y_lin_accel = y_lin_accel
+        self.linear_acceleration_x = linear_acceleration_x
+        self.linear_acceleration_y = linear_acceleration_y
+        self.linear_acceleration_z = linear_acceleration_z
 
         self.check_drifting()
 
@@ -102,9 +108,9 @@ class DriftDetector(Node):
     def check_drifting(self):
         if self.throttle == float('inf') or self.steering_angle == float('inf') or self.turning_radius == float('inf'):
             return
-        if self.theor_ang_vel == float('inf') or self.twist_angular_z == float('inf'):
+        if self.theor_ang_vel == float('inf') or self.twist_angular_z == float('inf') or self.twist_linear_x == float('inf') or self.twist_linear_y == float('inf'):
             return
-        if self.linear_acceleration == float('inf'):
+        if self.linear_acceleration_x == float('inf'):
             return
 
         # print('Checking drifting conditions at timestamp:', self.timestamp)
@@ -114,22 +120,26 @@ class DriftDetector(Node):
         odom_comb = 2 * np.sqrt(self.twist_linear_x**2 + self.twist_linear_y**2)
         throttle = self.throttle
 
+        # linear_drift_estimate acts as a slip value...dividing by odom_comb yields slip ratio
         linear_drift_estimate = abs(odom_comb - throttle)
         # print('Linear drift estimate:', linear_drift_estimate)
         # print(f'{self.timestamp},{linear_drift_estimate}')
 
-        if linear_drift_estimate > 2.0:  # Threshold for linear drift
+        if linear_drift_estimate > 3.0:  # Threshold for linear drift
             # print('Linear drift detected at timestamp:', self.timestamp)
             drifting_msg = Bool()
             drifting_msg.data = True
             self.drifting_publisher.publish(drifting_msg)
-            if self.timestamp - self.drifting_timestamp > 2.0:
+            if self.timestamp - self.drifting_timestamp > self.drift_length:
                 self.drifting = True
                 self.drifting_timestamp = self.timestamp
                 self.linear = True
         else:
-            if self.timestamp - self.drifting_timestamp > 2.0:
+            if self.timestamp - self.drifting_timestamp > self.drift_length:
                 self.drifting = False
+                if self.mus:
+                    print(f"Maximum mu: {np.max(self.mus)}")
+                    self.mus.clear()
 
         angular_val = np.deg2rad(self.twist_angular_z)
         theor_ang_val = self.theor_ang_vel
@@ -139,26 +149,27 @@ class DriftDetector(Node):
         # print('Angular drift estimate:', angular_drift_estimate)
         # print(f'{self.timestamp},{angular_drift_estimate}')
 
-        if angular_drift_estimate > 3.0:  # Threshold for angular drift
+        if angular_drift_estimate > 4.0:  # Threshold for angular drift
             # print('Angular drift detected at timestamp:', self.timestamp)
             drifting_msg = Bool()
             drifting_msg.data = True
             self.drifting_publisher.publish(drifting_msg)
-            if self.timestamp - self.drifting_timestamp > 2.0:
+            if self.timestamp - self.drifting_timestamp > self.drift_length:
                 self.drifting = True
                 self.drifting_timestamp = self.timestamp
                 self.angular = True
         else:
-            if self.timestamp - self.drifting_timestamp > 2.0:
+            if self.timestamp - self.drifting_timestamp > self.drift_length:
                 self.drifting = False
+                if self.mus:
+                    print(f"Maximum mu: {np.max(self.mus)}")
+                    self.mus.clear()
 
-        print(f'Drifting status at {self.timestamp}: {self.linear | self.angular}')
-        if self.linear:
-            print(f'Linear Mu: {abs(self.linear_acceleration / self.y_lin_accel)}')
-        if self.angular:
-            mu = ((2*odom_comb)**2 / self.turning_radius) / self.gravity
-            print(f'Angular Mu: {mu}')
-
+        if self.timestamp - self.drifting_timestamp < self.drift_length:
+            self.mus.append(np.sqrt(self.linear_acceleration_x**2 + self.linear_acceleration_y**2) / self.linear_acceleration_z)
+        
+        print(f'Drifting status at {self.timestamp}: {self.drifting}')
+      
 def main(args=None):
     rclpy.init(args=args)
     drift_detector = DriftDetector()
